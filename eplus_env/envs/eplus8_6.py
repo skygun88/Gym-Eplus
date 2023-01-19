@@ -21,6 +21,25 @@ from ..util.logger import Logger
 from ..util.time import (get_hours_to_now, get_time_string, get_delta_seconds, 
                          WEEKDAY_ENCODING)
 
+''' ---------------- '''
+import random
+from string import Template
+
+ 
+def normal_dist(x , mean , sd):
+    prob_density = (np.pi*sd) * np.exp(-0.5*((x-mean)/sd)**2)
+    return prob_density
+
+def softmax(a):
+    exp_a = np.exp(a)
+    sum_exp_a = np.sum(exp_a)
+    y=exp_a / sum_exp_a
+    return y
+
+
+
+''' ---------------- '''
+
 YEAR = 1991 # Non leap year
 CWD = os.getcwd();
 LOG_LEVEL_MAIN = 'INFO';
@@ -67,21 +86,32 @@ class EplusEnv(Env):
         sockname = s.getsockname();
         port = sockname[1];         # Get the port number
         s.listen(60)                # Listen on request
+        
         self.logger_main.debug('Socket is listening on host %s port %d'%(sockname));
         self._env_working_dir_parent = self._get_eplus_working_folder(CWD, '-%s-res'%(env_name));
+        ''' --------------------------------------------------- '''
+        self.start_time = int(time.time()*1000)
+        parent = self._env_working_dir_parent.split('Eplus')[0]
+        env_dir_path = self._env_working_dir_parent.split('/')[-1]
+        self._env_working_dir_parent = os.path.join(os.path.join(parent, str(self.start_time)), env_dir_path)
+        ''' --------------------------------------------------- '''
         os.makedirs(self._env_working_dir_parent);
+
         self._host = host;
         self._port = port;
         self._socket = s;
         self._eplus_path = eplus_path
         self._weather_path = weather_path
         self._variable_path = variable_path
+        ''' ------------------------------------------- '''
+        init_idf_path = os.path.dirname(os.path.realpath(__file__)) + '/eplus_models/demo_5z/learning/idf/5ZoneAutoDXVAV_v0.idf'
         self._idf_path = idf_path
+        ''' ------------------------------------------- '''
         self._episode_existed = False;
         (self._eplus_run_st_mon, self._eplus_run_st_day,
          self._eplus_run_ed_mon, self._eplus_run_ed_day,
          self._eplus_run_st_weekday,
-         self._eplus_run_stepsize) = self._get_eplus_run_info(idf_path);
+         self._eplus_run_stepsize) = self._get_eplus_run_info(init_idf_path);
         self._eplus_run_stepsize = 3600 / self._eplus_run_stepsize # Stepsize in second
         self._eplus_one_epi_len = self._get_one_epi_len(self._eplus_run_st_mon,
                                                         self._eplus_run_st_day,
@@ -91,6 +121,21 @@ class EplusEnv(Env):
         self._act_repeat = act_repeat;
         self._max_ep_data_store_num = max_ep_data_store_num;
         self._last_action = [20.0]; 
+
+
+        self.month_range = [8]
+        self.day_range = list(range(10, 12))
+        self.time_range = list(range(60*12, 60*16, 60))
+        self.tem_max = 30
+        self.tem_min = 18
+        self.update_action_space(self.tem_min, self.tem_max)
+
+    def update_action_space(self, tem_min, tem_max):
+        self.tem_max = tem_max
+        self.tem_min = tem_min
+        self.action_range = list(range(tem_min, tem_max+1))
+        self.normal = normal_dist(np.linspace(0, tem_max-tem_min, tem_max-tem_min+1), (tem_max-tem_min)//2, 2.5)
+        self.action_prob = softmax((np.max(self.normal) - self.normal) / np.max(self.normal))
 
     def reset(self):
         """Reset the environment.
@@ -112,11 +157,11 @@ class EplusEnv(Env):
         # End the last episode if exists
         if self._episode_existed:
             self._end_episode()
-            self.logger_main.info('Last EnergyPlus process has been closed. ')
+            # self.logger_main.info('Last EnergyPlus process has been closed. ')
             self._epi_num += 1;
         
         # Create EnergyPlus simulaton process
-        self.logger_main.info('Creating EnergyPlus simulation environment...')
+        # self.logger_main.info('Creating EnergyPlus simulation environment...')
         eplus_working_dir = self._get_eplus_working_folder(
                                 self._env_working_dir_parent, '-sub_run');
         os.makedirs(eplus_working_dir); # Create the Eplus working directory
@@ -130,7 +175,26 @@ class EplusEnv(Env):
         eplus_working_out_path = (eplus_working_dir + 
                                   '/' + 
                                   'output');
-        copyfile(self._idf_path, eplus_working_idf_path);
+        
+        ''' ------------------------------------------- '''
+        # copyfile(self._idf_path, eplus_working_idf_path);
+        # print(self.tem_max, self.tem_min)
+        self.update_action_space(self.tem_min, self.tem_max)
+        new_month = random.choice(self.month_range)
+        new_day = random.choice(self.day_range)
+        new_set = np.random.choice(np.array(self.action_range), 1, p=self.action_prob)[0]
+
+        # print()
+        with open(self._idf_path, 'r') as f:
+            ori_idf = f.read()
+            f.close()
+        with open(eplus_working_idf_path, 'w') as f:
+            new_idf = Template(ori_idf).substitute(begin_month=new_month, begin_day=new_day, init_stat=new_set)
+            f.write(new_idf)
+            f.close()
+
+        ''' ------------------------------------------- '''
+
                                     # Copy the idf file to the working directory
         copyfile(self._variable_path, eplus_working_var_path);
                                     # Copy the variable.cfg file to the working dir
@@ -138,8 +202,8 @@ class EplusEnv(Env):
                                 self._port,
                                 eplus_working_dir); 
                                     # Create the socket.cfg file in the working dir
-        self.logger_main.info('EnergyPlus working directory is in %s'
-                              %(eplus_working_dir));
+        # self.logger_main.info('EnergyPlus working directory is in %s'
+        #                       %(eplus_working_dir));
         eplus_process = self._create_eplus(self._eplus_path, self._weather_path, 
                                             eplus_working_idf_path,
                                             eplus_working_out_path,
@@ -233,6 +297,7 @@ class EplusEnv(Env):
         ret.append(Dblist);
         # Add terminal status
         ret.append(is_terminal);
+        ret.append(0)
         # Change some attributes
         self._curSimTim = curSimTim;
         return ret;

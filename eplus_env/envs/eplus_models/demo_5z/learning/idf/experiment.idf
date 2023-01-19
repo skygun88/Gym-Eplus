@@ -157,10 +157,10 @@
 
   RunPeriod,
     ,                        !- Name
-    8,                       !- Begin Month
-    1,                       !- Begin Day of Month
+    $begin_month,                       !- Begin Month
+    $begin_day,                       !- Begin Day of Month
     8,                       !- End Month
-    1,                       !- End Day of Month
+    31,                       !- End Day of Month
     Monday,                 !- Day of Week for Start Day
     Yes,                     !- Use Weather File Holidays and Special Days
     Yes,                     !- Use Weather File Daylight Saving Period
@@ -2842,12 +2842,12 @@ SizingPeriod:DesignDay,
   ExternalInterface:Schedule ,
     Space1-HtgSetP-RL, !- Name
     Temperature , !- ScheduleType
-    25; !- Initial value, used during warm-up
+    $init_stat ; !- Initial value, used during warm-up
     
   ExternalInterface:Schedule ,
     Space1-ClgSetP-RL, !- Name
     Temperature , !- ScheduleType
-    25; !- Initial value, used during warm-up
+    $init_stat ; !- Initial value, used during warm-up
     
   !- Site weather output  
   Output:Variable,*,Site Outdoor Air Drybulb Temperature,timestep;
